@@ -6,6 +6,7 @@ use std::{
 
 use bindet;
 use clap::{Parser, Subcommand};
+use cmd_lib::run_cmd;
 use dirs::{config_dir, home_dir};
 use minijinja::{self, Environment};
 use owo_colors::OwoColorize;
@@ -158,32 +159,11 @@ fn main() -> io::Result<()> {
             // TODO: Perform post-installation
         }
         Command::Sync => {
-            // TODO: Clean up this mess
-            process::Command::new("git")
-                .arg("pull")
-                .spawn()
-                .expect("failed to spawn `git` process")
-                .wait()
-                .expect("`git` process failed to finish");
+            run_cmd!(git pull).pipe(log_on_err);
 
-            process::Command::new("git")
-                .args(["submodule", "init"])
-                .spawn()
-                .expect("failed to spawn `git` process")
-                .wait()
-                .expect("`git` process failed to finish");
-            process::Command::new("git")
-                .args(["submodule", "sync"])
-                .spawn()
-                .expect("failed to spawn `git` process")
-                .wait()
-                .expect("`git` process failed to finish");
-            process::Command::new("git")
-                .args(["submodule", "update"])
-                .spawn()
-                .expect("failed to spawn `git` process")
-                .wait()
-                .expect("`git` process failed to finish");
+            run_cmd!(git submodule init).pipe(log_on_err);
+            run_cmd!(git submodule sync).pipe(log_on_err);
+            run_cmd!(git submodule update).pipe(log_on_err);
         }
         Command::Deploy {
             dotfiles: dotfiles_to_deploy,

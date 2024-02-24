@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bindet = "0.3.2"
 clap = { version = "4.5.1", features = ["derive"] }
+cmd_lib = "1.9.3"
 dirs = "5.0.1"
 minijinja = "1.0.12"
 owo-colors = "4.0.0"
