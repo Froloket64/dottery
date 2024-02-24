@@ -1,0 +1,21 @@
+[package]
+name = "dottery"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bindet = "0.3.2"
+clap = { version = "4.5.1", features = ["derive"] }
+dirs = "5.0.1"
+minijinja = "1.0.12"
+owo-colors = "4.0.0"
+serde = { version = "1.0.197", features = ["derive"] }
+tap = "1.0.1"
+toml = "0.8.10"
+walkdir = "2.4.0"
+
+[[bin]]
+name = "dot"
+path = "src/main.rs"
