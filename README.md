@@ -30,7 +30,7 @@ Firstly, `dottery` uses the following structure:
 ├╴raw/ <- Raw files
 ╰╴..toml <- Config file
 ```
-Template files are files that contain `minininja` templates and are processed separately. They use substitutions configured in the config file (`..toml`).
+Template files are files that contain [`minininja`](https://crates.io/crates/minijinja) templates and are processed separately. They use substitutions configured in the config file (`..toml`).
 
 The structure of `template/` and `raw/` directories must be the same as the path, where each file will be copied. For example, if one has the following structure:
 ```
