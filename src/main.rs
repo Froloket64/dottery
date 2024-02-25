@@ -188,7 +188,7 @@ fn main() -> io::Result<()> {
                 .filter_map(|r| match r {
                     Ok(d) => d.file_type().is_file().then_some(d),
                     Err(e) => {
-                        eprintln!("failed to read file: {e}");
+                        log_error(&format!("failed to read file: {e}"));
                         None
                     }
                 })
@@ -230,7 +230,7 @@ fn main() -> io::Result<()> {
                 .filter_map(|r| match r {
                     Ok(d) => d.file_type().is_file().then_some(d),
                     Err(e) => {
-                        eprintln!("failed to read file: {e}");
+                        log_error(&format!("failed to read file: {e}"));
                         None
                     }
                 })
@@ -323,7 +323,7 @@ fn read_config() -> io::Result<Config> {
             Ok(config_default)
         }
         Err(e) => {
-            eprintln!("failed to read config file: {e}");
+            log_error(&format!("failed to read config file: {e}"));
 
             Ok(Config::default())
         }
@@ -357,7 +357,7 @@ fn is_yay_installed() -> bool {
         Err(e) => {
             // Assume that it's just an error on user's side and
             // let them know about it
-            eprintln!("{e}");
+            log_error(&format!("{e}"));
 
             // Continue attempting to use `yay`
             true
