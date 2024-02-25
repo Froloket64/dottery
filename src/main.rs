@@ -1,5 +1,6 @@
 use std::{
     fmt::Display,
+    fs::canonicalize,
     io::{self, BufReader, Read, Seek},
     path::Component,
     process::{self, ExitStatus, Stdio},
@@ -17,14 +18,10 @@ use toml;
 use walkdir::WalkDir;
 
 // TODO:
-// - Canonicalize all paths from configs
 // - Add verbosity
 // - Fix weird crashes
 // - Fix templates randomly missing
 // - Implement dependency installation
-// - Implement sanity checks
-//   - Check if dotfiles dir exists
-//   - Check if dotfiles dir contains `..toml`
 
 const CONFIG_DIR: &str = "dottery";
 const CONFIG_FILE: &str = "config.toml";
@@ -107,9 +104,10 @@ impl Package {
 fn main() -> io::Result<()> {
     let config = read_config()?;
 
-    std::env::set_current_dir(&config.paths.dotfiles_path)?;
+    std::env::set_current_dir(&config.paths.dotfiles_path).expect("dotfiles directory not found");
 
-    let mut settings: toml::Value = std::fs::read_to_string("..toml")?
+    let mut settings: toml::Value = std::fs::read_to_string("..toml")
+        .expect("`..toml` not found in dotfiles directory")
         .pipe(|s| toml::from_str(&s))
         .expect("failed to parse dotfiles configuration");
 
@@ -232,6 +230,16 @@ fn read_config() -> io::Result<Config> {
         }
         Ok(s) => Ok(toml::from_str(&s).expect("failed to parse config file")),
     }
+    .tap_ok_mut(|c| {
+        c.paths.dotfiles_path = canonicalize(&c.paths.dotfiles_path)
+            .expect(&format!(
+                "dotfiles path not found: `{}`",
+                &c.paths.dotfiles_path
+            ))
+            .to_str()
+            .unwrap()
+            .to_string()
+    })
 }
 
 fn install_pkgs<'a>(
