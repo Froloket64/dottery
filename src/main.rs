@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
     io::{self, BufReader, Read, Seek},
+    path::Component,
     process::{self, ExitStatus, Stdio},
 };
 
@@ -17,7 +18,6 @@ use walkdir::WalkDir;
 
 // TODO:
 // - Canonicalize all paths from configs
-// - Add logging
 // - Add verbosity
 // - Fix weird crashes
 // - Fix templates randomly missing
@@ -47,7 +47,15 @@ enum Command {
     /// Print dotfiles directory
     Locate,
     /// Process and copy templates and raw dotfiles to their locations
-    Deploy { dotfiles: Option<Vec<String>> },
+    Deploy {
+        dotfiles: Option<Vec<String>>,
+        /// Only copy raw files
+        #[arg(short, long)]
+        raw: bool,
+        /// Only process templates
+        #[arg(short, long)]
+        template: bool,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -170,128 +178,23 @@ fn main() -> io::Result<()> {
         }
         Command::Deploy {
             dotfiles: dotfiles_to_deploy,
+            template: template_only,
+            raw: raw_only,
         } => {
-            // TODO: Implement selective deployment
-            let template_dir = format!("{}/template/", config.paths.dotfiles_path);
-            let raw_dir = format!("{}/raw/", config.paths.dotfiles_path);
-
-            let template_files = WalkDir::new(template_dir);
-            let raw_files = WalkDir::new(raw_dir);
-
             let home = home_dir().unwrap();
             let home_str = home.to_str().unwrap();
 
-            log_msg("Copying raw files");
+            if !template_only {
+                log_msg("Copying raw files");
 
-            raw_files
-                .into_iter()
-                .filter_map(|r| match r {
-                    Ok(d) => d.file_type().is_file().then_some(d),
-                    Err(e) => {
-                        log_error(&format!("failed to read file: {e}"));
-                        None
-                    }
-                })
-                .for_each(|f| {
-                    let path = f
-                        .path()
-                        .to_string_lossy()
-                        .to_string()
-                        .tap(|p| println!("{p}"));
+                copy_raw(&config, home_str);
+            }
 
-                    std::fs::copy(
-                        &path,
-                        path.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str),
-                    )
-                    .pipe(log_on_err)
-                });
+            if !raw_only {
+                log_msg("Processing template files");
 
-            let mut env = Environment::new();
-
-            log_msg("Processing template files");
-
-            template_files
-                .into_iter()
-                // .filter_entry(|e| {
-                //     dotfiles_to_deploy.map_or(true, |ds| {
-                //         e.clone()
-                //             .into_path()
-                //             .components()
-                //             .find(|c| {
-                //                 if let Component::Normal(d) = c {
-                //                     ds.contains(&d.to_string_lossy().to_string())
-                //                 } else {
-                //                     false
-                //                 }
-                //             })
-                //             .is_some()
-                //     })
-                // })
-                .filter_map(|r| match r {
-                    Ok(d) => d.file_type().is_file().then_some(d),
-                    Err(e) => {
-                        log_error(&format!("failed to read file: {e}"));
-                        None
-                    }
-                })
-                .map(|f| {
-                    let path = f.path();
-                    let path_str = path.to_str().unwrap();
-                    let file = std::fs::File::open(path)?;
-
-                    let mut buf = BufReader::new(file);
-                    let mut contents = String::new();
-
-                    match bindet::detect(&mut buf)? {
-                        Some(_) => return Ok(()),
-                        None => (),
-                    };
-
-                    buf.rewind()?;
-                    buf.read_to_string(&mut contents)?;
-
-                    println!("{path_str}");
-
-                    // NOTE: I hate to do this, but it's safe, since we don't use the values after
-                    // the closure ends
-                    let result = env.add_template(
-                        unsafe { std::mem::transmute::<&str, &'_ str>(path_str) },
-                        unsafe { std::mem::transmute::<&String, &'_ String>(&contents) },
-                    );
-
-                    if let Err(e) = result {
-                        log_error(&format!("{e}"));
-                        return Ok(());
-                    }
-
-                    let tmpl = match env.get_template(path_str) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            log_error(&format!("{e}"));
-                            return Ok(());
-                        }
-                    };
-
-                    let output = match tmpl.render(&settings) {
-                        Ok(o) => o,
-                        Err(e) => {
-                            log_error(&format!("{e}"));
-                            return Ok(());
-                        }
-                    };
-
-                    std::fs::write(
-                        path.to_str().unwrap().replace(
-                            &format!("{}/template", config.paths.dotfiles_path),
-                            home_str,
-                        ),
-                        output,
-                    )?;
-
-                    io::Result::Ok(())
-                })
-                .collect::<io::Result<()>>()
-                .pipe(log_on_err);
+                process_templates(dotfiles_to_deploy, settings, &config, home_str).pipe(log_on_err);
+            }
         }
         Command::Locate => {
             log_msg("Dotfiles directory");
@@ -345,6 +248,131 @@ fn install_pkgs<'a>(
         .spawn()
         .map(|mut c| c.wait())
         .unwrap_or_else(|e| Err(e))
+}
+
+fn copy_raw(config: &Config, home_str: &str) {
+    let dir = format!("{}/raw/", config.paths.dotfiles_path);
+    let files = WalkDir::new(dir);
+
+    files
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok(d) => d.file_type().is_file().then_some(d),
+            Err(e) => {
+                log_error(&format!("failed to read file: {e}"));
+                None
+            }
+        })
+        .for_each(|f| {
+            let path = f
+                .path()
+                .to_string_lossy()
+                .to_string()
+                .tap(|p| println!("{p}"));
+
+            std::fs::copy(
+                &path,
+                path.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str),
+            )
+            .pipe(log_on_err)
+        });
+}
+
+fn process_templates(
+    to_deploy: Option<Vec<String>>,
+    settings: toml::Value,
+    config: &Config,
+    home_str: &str,
+) -> io::Result<()> {
+    let dir = format!("{}/template/", config.paths.dotfiles_path);
+    let files = WalkDir::new(dir);
+
+    let mut env = Environment::new();
+
+    files
+        .into_iter()
+        .filter_entry(|e| {
+            e.file_type().is_dir()
+                || if let Some(ref ds) = to_deploy {
+                    e.clone()
+                        .into_path()
+                        .components()
+                        .find(|c| {
+                            if let Component::Normal(d) = c {
+                                ds.contains(&d.to_string_lossy().to_string())
+                            } else {
+                                false
+                            }
+                        })
+                        .is_some()
+                } else {
+                    true
+                }
+        })
+        .filter_map(|r| match r {
+            Ok(d) => d.file_type().is_file().then_some(d),
+            Err(e) => {
+                log_error(&format!("failed to read file: {e}"));
+                None
+            }
+        })
+        .map(|f| {
+            let path = f.path();
+            let path_str = path.to_str().unwrap();
+            let file = std::fs::File::open(path)?;
+
+            let mut buf = BufReader::new(file);
+            let mut contents = String::new();
+
+            match bindet::detect(&mut buf)? {
+                Some(_) => return Ok(()),
+                None => (),
+            };
+
+            buf.rewind()?;
+            buf.read_to_string(&mut contents)?;
+
+            println!("{path_str}");
+
+            // NOTE: I hate to do this, but it's safe, since we don't use the values after
+            // the closure ends
+            let result = env.add_template(
+                unsafe { std::mem::transmute::<&str, &'_ str>(path_str) },
+                unsafe { std::mem::transmute::<&String, &'_ String>(&contents) },
+            );
+
+            if let Err(e) = result {
+                log_error(&format!("{e}"));
+                return Ok(());
+            }
+
+            let tmpl = match env.get_template(path_str) {
+                Ok(t) => t,
+                Err(e) => {
+                    log_error(&format!("{e}"));
+                    return Ok(());
+                }
+            };
+
+            let output = match tmpl.render(&settings) {
+                Ok(o) => o,
+                Err(e) => {
+                    log_error(&format!("{e}"));
+                    return Ok(());
+                }
+            };
+
+            std::fs::write(
+                path.to_str().unwrap().replace(
+                    &format!("{}/template", config.paths.dotfiles_path),
+                    home_str,
+                ),
+                output,
+            )?;
+
+            io::Result::Ok(())
+        })
+        .collect::<io::Result<()>>()
 }
 
 fn is_yay_installed() -> bool {
