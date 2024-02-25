@@ -161,9 +161,12 @@ fn main() -> io::Result<()> {
         Command::Sync => {
             run_cmd!(git pull).pipe(log_on_err);
 
-            run_cmd!(git submodule init).pipe(log_on_err);
-            run_cmd!(git submodule sync).pipe(log_on_err);
-            run_cmd!(git submodule update).pipe(log_on_err);
+            run_cmd! {
+                git submodule init;
+                git submodule sync;
+                git submodule update;
+            }
+            .pipe(log_on_err);
         }
         Command::Deploy {
             dotfiles: dotfiles_to_deploy,
@@ -291,10 +294,6 @@ fn main() -> io::Result<()> {
                 .pipe(log_on_err);
         }
         Command::Locate => {
-            // log_msg(&format!(
-            //     "Dotfiles directory: {}",
-            //     config.paths.dotfiles_path
-            // ));
             log_msg("Dotfiles directory");
             println!("{}", config.paths.dotfiles_path);
         }
@@ -305,9 +304,10 @@ fn main() -> io::Result<()> {
 }
 
 fn read_config() -> io::Result<Config> {
-    let mut config_file = config_dir().unwrap();
-    config_file.push(CONFIG_DIR);
-    config_file.push(CONFIG_FILE);
+    let config_file = config_dir()
+        .unwrap()
+        .tap_mut(|cf| cf.push(CONFIG_DIR))
+        .tap_mut(|cf| cf.push(CONFIG_FILE));
 
     match std::fs::read_to_string(config_file.clone()) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
