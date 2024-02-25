@@ -38,7 +38,14 @@ enum Command {
     /// Install configured packages
     Install { packages: Option<Vec<String>> },
     /// Install dependencies
-    InstallDeps,
+    InstallDeps {
+        /// Only install required dependencies
+        #[arg(short, long)]
+        required: bool,
+        /// Only install optional dependencies
+        #[arg(short, long)]
+        optional: bool,
+    },
     /// Synchronize local dotfiles with remote repo
     Sync,
     /// Print dotfiles directory
@@ -83,12 +90,19 @@ impl Default for Config {
 #[derive(Clone, Debug, Deserialize)]
 struct Dotfiles {
     packages: Vec<Package>,
+    dependencies: Option<Dependencies>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct Package {
     name: String,
     from_aur: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Dependencies {
+    required: Option<Vec<Package>>,
+    optional: Option<Vec<Package>>,
 }
 
 impl Package {
@@ -131,36 +145,11 @@ fn main() -> io::Result<()> {
         } => {
             let cmd: &str;
 
-            // NOTE: Collecting into a `Vec<_>` isn't very efficient, but is preferred because
-            // makes the code more readable. Iterators are different types, so the `if let` would be a
-            // lot more cluttered.
-            let packages: Vec<&str> = if !is_yay_installed() {
-                cmd = "pacman";
+            let (cmd, packages) =
+                filter_packages(dotfiles.packages.iter(), packages_to_install.as_ref());
 
-                dotfiles
-                    .packages
-                    .iter()
-                    .filter_map(|pkg| pkg.from_aur().then_some(pkg.name()))
-                    .pipe(|pkgs| {
-                        if let Some(ps) = packages_to_install {
-                            pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
-                        } else {
-                            pkgs.collect()
-                        }
-                    })
-            } else {
-                cmd = "yay";
-
-                dotfiles.packages.iter().map(Package::name).pipe(|pkgs| {
-                    if let Some(ps) = packages_to_install {
-                        pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
-                    } else {
-                        pkgs.collect()
-                    }
-                })
-            };
-
-            install_pkgs(cmd, packages).expect(&format!("failed to spawn process `{cmd}`"));
+            install_pkgs(cmd, packages.into_iter())
+                .expect(&format!("failed to spawn process `{cmd}`"));
 
             // TODO: Perform post-installation
         }
@@ -198,7 +187,29 @@ fn main() -> io::Result<()> {
             log_msg("Dotfiles directory");
             println!("{}", config.paths.dotfiles_path);
         }
-        _ => (),
+        Command::InstallDeps {
+            required: required_only,
+            optional: optional_only,
+        } => match dotfiles.dependencies {
+            None => (),
+            Some(ds) => {
+                if !optional_only {
+                    if let Some(ps) = ds.required {
+                        let (cmd, packages) = filter_packages(ps.iter(), None);
+
+                        install_pkgs(cmd, packages.into_iter()).pipe(log_on_err);
+                    };
+                }
+
+                if !required_only {
+                    if let Some(ps) = ds.optional {
+                        let (cmd, packages) = filter_packages(ps.iter(), None);
+
+                        install_pkgs(cmd, packages.into_iter()).pipe(log_on_err);
+                    }
+                }
+            }
+        },
     }
 
     Ok(())
@@ -242,10 +253,7 @@ fn read_config() -> io::Result<Config> {
     })
 }
 
-fn install_pkgs<'a>(
-    cmd: &str,
-    packages: impl IntoIterator<Item = &'a str>,
-) -> io::Result<ExitStatus> {
+fn install_pkgs<'a>(cmd: &str, packages: impl Iterator<Item = &'a str>) -> io::Result<ExitStatus> {
     let mut args = vec!["-S", "--needed"];
 
     args.extend(packages);
@@ -381,6 +389,42 @@ fn process_templates(
             io::Result::Ok(())
         })
         .collect::<io::Result<()>>()
+}
+
+// TODO: Use an enum for package manager
+fn filter_packages<'a>(
+    packages: impl Iterator<Item = &'a Package>,
+    to_install: Option<&Vec<String>>,
+) -> (&'a str, Vec<&'a str>) {
+    // NOTE: Collecting into a `Vec<_>` isn't very efficient, but is preferred because
+    // makes the code more readable. Iterators are different types, so the `if let` would be a
+    // lot more cluttered.
+    if !is_yay_installed() {
+        (
+            "pacman",
+            packages
+                .into_iter()
+                .filter_map(|pkg| pkg.from_aur().then_some(pkg.name()))
+                .pipe(|pkgs| {
+                    if let Some(ps) = to_install {
+                        pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
+                    } else {
+                        pkgs.collect()
+                    }
+                }),
+        )
+    } else {
+        (
+            "yay",
+            packages.into_iter().map(Package::name).pipe(|pkgs| {
+                if let Some(ps) = to_install {
+                    pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
+                } else {
+                    pkgs.collect()
+                }
+            }),
+        )
+    }
 }
 
 fn is_yay_installed() -> bool {

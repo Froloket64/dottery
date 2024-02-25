@@ -3,7 +3,7 @@ dottery
 A dead simple, yet powerful utility that manages dotfiles:
 - Synchronize with **git repo**
 - Process **templates**
-- **Install** configured packages and dependencies _(TODO)_
+- **Install** configured packages and dependencies
 
 # Installation
 ## From source
@@ -69,6 +69,27 @@ You can install configured [packages](#dotfiles) via `install`:
 `$ dot install`
 
 Currently, only **Arch Linux** _(btw)_ is supported.
+
+## Install dependencies
+If your dotfiles configuration depends on some packages, you can put them in `..toml`:
+```toml
+[dottery.dependencies]
+# Dependencies that are required for certain configs to function
+required = [
+    { name = "swaybg", from_aur = false },
+    { name = "ttf-cascadia-code", from_aur = false },
+]
+# Dependencies that enable addional features
+optional = [
+    { name = "btop", from_aur = false },
+    { name = "eza", from_aur = false },
+]
+```
+
+To install them, just call
+```sh
+$ dot install-deps
+```
 
 ## Configuration
 ### General
