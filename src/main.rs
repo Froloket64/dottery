@@ -258,6 +258,11 @@ fn install_pkgs<'a>(cmd: &str, packages: impl Iterator<Item = &'a str>) -> io::R
 
     args.extend(packages);
 
+    if args.len() == 2 {
+        // HACK: Should return signify that there's no packages to install
+        return Ok(ExitStatus::default());
+    }
+
     process::Command::new(cmd)
         .args(args)
         .stdin(Stdio::inherit())
