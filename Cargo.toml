@@ -10,7 +10,7 @@ bindet = "0.3.2"
 clap = { version = "4.5.1", features = ["derive"] }
 cmd_lib = "1.9.3"
 dirs = "5.0.1"
-minijinja = "1.0.12"
+minijinja = { version = "1.0.12", features = ["loader"] }
 owo-colors = "4.0.0"
 serde = { version = "1.0.197", features = ["derive"] }
 tap = "1.0.1"

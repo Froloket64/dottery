@@ -19,9 +19,6 @@ use walkdir::WalkDir;
 
 // TODO:
 // - Add verbosity
-// - Fix weird crashes
-// - Fix templates randomly missing
-// - Implement dependency installation
 
 const CONFIG_DIR: &str = "dottery";
 const CONFIG_FILE: &str = "config.toml";
@@ -143,8 +140,6 @@ fn main() -> io::Result<()> {
         Command::Install {
             packages: packages_to_install,
         } => {
-            let cmd: &str;
-
             let (cmd, packages) =
                 filter_packages(dotfiles.packages.iter(), packages_to_install.as_ref());
 
@@ -355,19 +350,8 @@ fn process_templates(
 
             println!("{path_str}");
 
-            // NOTE: I hate to do this, but it's safe, since we don't use the values after
-            // the closure ends
-            let result = env.add_template(
-                unsafe { std::mem::transmute::<&str, &'_ str>(path_str) },
-                unsafe { std::mem::transmute::<&String, &'_ String>(&contents) },
-            );
-
-            if let Err(e) = result {
-                log_error(&format!("{e}"));
-                return Ok(());
-            }
-
-            let tmpl = match env.get_template(path_str) {
+            // NOTE: I'm so fucking stupid
+            let tmpl = match env.template_from_str(&contents) {
                 Ok(t) => t,
                 Err(e) => {
                     log_error(&format!("{e}"));
