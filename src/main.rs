@@ -2,7 +2,7 @@ use std::{
     fmt::Display,
     fs::canonicalize,
     io::{self, BufReader, Read, Seek},
-    path::Component,
+    path::{Component, Path},
     process::{self, ExitStatus, Stdio},
 };
 
@@ -280,17 +280,20 @@ fn copy_raw(config: &Config, home_str: &str) {
             }
         })
         .for_each(|f| {
-            let path = f
+            let path_str = f
                 .path()
                 .to_string_lossy()
                 .to_string()
                 .tap(|p| println!("{p}"));
+            let target_path =
+                path_str.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str);
+            let parent_dir = Path::new(&target_path).parent().unwrap();
 
-            std::fs::copy(
-                &path,
-                path.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str),
-            )
-            .pipe(log_on_err)
+            if !parent_dir.exists() {
+                std::fs::create_dir_all(&parent_dir).pipe(log_on_err);
+            }
+
+            std::fs::copy(&path_str, &target_path).pipe(log_on_err)
         });
 }
 
@@ -303,7 +306,7 @@ fn process_templates(
     let dir = format!("{}/template/", config.paths.dotfiles_path);
     let files = WalkDir::new(dir);
 
-    let mut env = Environment::new();
+    let env = Environment::new();
 
     files
         .into_iter()
@@ -367,15 +370,17 @@ fn process_templates(
                 }
             };
 
-            std::fs::write(
-                path.to_str().unwrap().replace(
-                    &format!("{}/template", config.paths.dotfiles_path),
-                    home_str,
-                ),
-                output,
-            )?;
+            let target_path = path_str.replace(
+                &format!("{}/template", config.paths.dotfiles_path),
+                home_str,
+            );
+            let parent_dir = Path::new(&target_path).parent().unwrap();
 
-            io::Result::Ok(())
+            if !parent_dir.exists() {
+                std::fs::create_dir_all(&parent_dir)?;
+            }
+
+            std::fs::write(target_path, output)
         })
         .collect::<io::Result<()>>()
 }
