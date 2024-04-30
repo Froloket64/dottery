@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fmt::Display,
     fs::canonicalize,
     io::{self, BufReader, Read, Seek},
@@ -64,11 +65,6 @@ struct Config {
     paths: Paths,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Paths {
-    dotfiles_path: String,
-}
-
 impl Default for Config {
     fn default() -> Self {
         let mut home = home_dir().unwrap();
@@ -82,6 +78,11 @@ impl Default for Config {
             },
         }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Paths {
+    dotfiles_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -353,7 +354,6 @@ fn process_templates(
 
             println!("{path_str}");
 
-            // NOTE: I'm so fucking stupid
             let tmpl = match env.template_from_str(&contents) {
                 Ok(t) => t,
                 Err(e) => {
@@ -370,17 +370,22 @@ fn process_templates(
                 }
             };
 
-            let target_path = path_str.replace(
+            let target_path_str = path_str.replace(
                 &format!("{}/template", config.paths.dotfiles_path),
                 home_str,
             );
-            let parent_dir = Path::new(&target_path).parent().unwrap();
+            let target_path = Path::new(&target_path_str);
+            let parent_dir = target_path.parent().unwrap();
 
             if !parent_dir.exists() {
                 std::fs::create_dir_all(&parent_dir)?;
             }
 
-            std::fs::write(target_path, output)
+            std::fs::write(&target_path, output)?;
+
+            process_sass(target_path);
+
+            Ok(())
         })
         .collect::<io::Result<()>>()
 }
@@ -450,4 +455,25 @@ fn log_error(msg: &str) {
 
 fn log_on_err<T, E: Display>(result: Result<T, E>) {
     let _ = result.map_err(|e| log_error(&format!("{e}")));
+}
+
+fn process_sass<P: AsRef<Path>>(path: P) {
+    let sass_extensions: Vec<&OsStr> = ["sass", "scss"].into_iter().map(str::as_ref).collect();
+    let old_path = path.as_ref();
+
+    old_path.extension().map(|e| {
+        if sass_extensions.contains(&e) {
+            let new_path = old_path.with_extension("css");
+
+            let result = run_cmd! {
+                sass ${old_path} ${new_path} --no-source-map
+            };
+
+            log_on_err(result);
+        }
+        // } else {
+        //     Ok(())
+        // }
+    });
+    // .unwrap_or(Ok(()))
 }
