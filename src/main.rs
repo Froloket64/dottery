@@ -18,9 +18,6 @@ use tap::prelude::*;
 use toml;
 use walkdir::WalkDir;
 
-// TODO:
-// - Add verbosity
-
 const CONFIG_DIR: &str = "dottery";
 const CONFIG_FILE: &str = "config.toml";
 
@@ -57,6 +54,9 @@ enum Command {
         /// Only process templates
         #[arg(short, long)]
         template: bool,
+        /// Print log
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -163,6 +163,7 @@ fn main() -> io::Result<()> {
             dotfiles: dotfiles_to_deploy,
             template: template_only,
             raw: raw_only,
+            verbose,
         } => {
             let home = home_dir().unwrap();
             let home_str = home.to_str().unwrap();
@@ -170,13 +171,13 @@ fn main() -> io::Result<()> {
             if !template_only {
                 log_msg("Copying raw files");
 
-                copy_raw(&config, home_str);
+                copy_raw(&config, home_str, verbose);
             }
 
             if !raw_only {
                 log_msg("Processing template files");
 
-                process_templates(dotfiles_to_deploy, settings, &config, home_str).pipe(log_on_err);
+                process_templates(dotfiles_to_deploy, settings, &config, home_str, verbose).pipe(log_on_err);
             }
         }
         Command::Locate => {
@@ -267,7 +268,7 @@ fn install_pkgs<'a>(cmd: &str, packages: impl Iterator<Item = &'a str>) -> io::R
         .unwrap_or_else(|e| Err(e))
 }
 
-fn copy_raw(config: &Config, home_str: &str) {
+fn copy_raw(config: &Config, home_str: &str, verbose: bool) {
     let dir = format!("{}/raw/", config.paths.dotfiles_path);
     let files = WalkDir::new(dir);
 
@@ -285,7 +286,8 @@ fn copy_raw(config: &Config, home_str: &str) {
                 .path()
                 .to_string_lossy()
                 .to_string()
-                .tap(|p| println!("{p}"));
+                // .tap(|p| println!("{p}"));
+                .tap(|p| if verbose { println!("{p}") });
             let target_path =
                 path_str.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str);
             let parent_dir = Path::new(&target_path).parent().unwrap();
@@ -303,6 +305,7 @@ fn process_templates(
     settings: toml::Value,
     config: &Config,
     home_str: &str,
+    verbose: bool,
 ) -> io::Result<()> {
     let dir = format!("{}/template/", config.paths.dotfiles_path);
     let files = WalkDir::new(dir);
@@ -352,7 +355,9 @@ fn process_templates(
             buf.rewind()?;
             buf.read_to_string(&mut contents)?;
 
-            println!("{path_str}");
+            if verbose {
+                println!("{path_str}");
+            }
 
             let tmpl = match env.template_from_str(&contents) {
                 Ok(t) => t,
