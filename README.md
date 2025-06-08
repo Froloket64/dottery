@@ -28,9 +28,13 @@ Firstly, `dottery` uses the following structure:
 /
 ├╴template/ <- Template files
 ├╴raw/ <- Raw files
-╰╴..toml <- Config file
+├╴..toml <- Config file
+╰╴.personal.toml <- Personal configuration
 ```
 Template files are files that contain [`minininja`](https://crates.io/crates/minijinja) templates and are processed separately. They use substitutions configured in the config file (`..toml`).
+
+Personal configuration can be stored in `.personal.toml`, which is used when pushing dotfiles to a repository, and some configs will always depend on the user/system.
+After parsing, both configs will be concatenated and used when processing. Furthermore, `.personal.toml` will currently completely replace all redefined sections from `..toml`.
 
 The structure of `template/` and `raw/` directories must be the same as the path, where each file will be copied. For example, if one has the following structure:
 ```
