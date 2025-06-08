@@ -93,9 +93,9 @@ impl Package {
 
 /// Parses the config file into `io::Result<[Config]>`.
 pub fn read_config(config_file: &Path) -> io::Result<Config> {
-    let mut config_res = match std::fs::read_to_string(config_file.clone()) {
+    let mut config_res = match std::fs::read_to_string(config_file) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(config_file.clone().parent().unwrap())?;
+            std::fs::create_dir_all(config_file.parent().unwrap())?;
 
             let config_default = Config::default();
 
