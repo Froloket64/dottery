@@ -19,6 +19,7 @@ pub const CONFIG_FILE: &str = "config.toml";
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub paths: Paths,
+    pub files: Files,
 }
 
 impl Default for Config {
@@ -32,6 +33,9 @@ impl Default for Config {
             paths: Paths {
                 dotfiles_path: dotfiles_path.into(),
             },
+            files: Files {
+                include: vec![".personal.toml".into()],
+            }
         }
     }
 }
@@ -39,6 +43,13 @@ impl Default for Config {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Paths {
     pub dotfiles_path: String,
+}
+
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Files {
+    /// Files that need to be included when reading manifest.
+    pub include: Vec<String>,
 }
 
 /// Core dotfiles manifest.

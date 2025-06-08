@@ -70,10 +70,19 @@ fn main() -> io::Result<()> {
         .pipe(|s| toml::from_str(&s))
         .expect("failed to parse dotfiles configuration");
 
-    let other: toml::Value = std::fs::read_to_string(".personal.toml")
-        .expect("`.personal.toml` not found in dotfiles directory")
-        .pipe(|s| toml::from_str(&s))
-        .expect("failed to parse dotfiles configuration");
+    // Process other files from `files.include`
+    config.files.include.iter().for_each(|include_file| {
+        let other: toml::Value = std::fs::read_to_string(include_file)
+            .expect(&format!("`{}` not found in dotfiles directory", include_file))
+            .pipe(|s| toml::from_str(&s))
+            .expect("failed to parse dotfiles configuration");
+
+        // Merge into previous settings
+        match (&mut settings, other) {
+            (toml::Value::Table(lhs), toml::Value::Table(rhs)) => lhs.extend(rhs.into_iter()),
+            _ => todo!(),
+        };
+    });
 
     // TODO? Extend each section instead of replacing it
     // match &mut settings {
@@ -82,10 +91,6 @@ fn main() -> io::Result<()> {
     //         toml::
     //     })
     // }
-    match (&mut settings, other) {
-        (toml::Value::Table(lhs), toml::Value::Table(rhs)) => lhs.extend(rhs.into_iter()),
-        _ => todo!(),
-    };
 
     let dotfiles = settings
         .as_table_mut()
