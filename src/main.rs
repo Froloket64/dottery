@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use cmd_lib::run_cmd;
 use dirs::{config_dir, home_dir};
 use tap::prelude::*;
-use toml;
 
 mod config;
 mod logging;
@@ -73,13 +72,16 @@ fn main() -> io::Result<()> {
     // Process other files from `files.include`
     config.files.include.iter().for_each(|include_file| {
         let other: toml::Value = std::fs::read_to_string(include_file)
-            .expect(&format!("`{}` not found in dotfiles directory", include_file))
+            .expect(&format!(
+                "`{}` not found in dotfiles directory",
+                include_file
+            ))
             .pipe(|s| toml::from_str(&s))
             .expect("failed to parse dotfiles configuration");
 
         // Merge into previous settings
         match (&mut settings, other) {
-            (toml::Value::Table(lhs), toml::Value::Table(rhs)) => lhs.extend(rhs.into_iter()),
+            (toml::Value::Table(lhs), toml::Value::Table(rhs)) => lhs.extend(rhs),
             _ => todo!(),
         };
     });
@@ -95,11 +97,11 @@ fn main() -> io::Result<()> {
     let dotfiles = settings
         .as_table_mut()
         .map(|table| {
-            let dottery = table
+            let dottery_section = table
                 .remove("dottery")
                 .expect("failed to get section `dottery`");
 
-            Dotfiles::deserialize(dottery)
+            Dotfiles::deserialize(dottery_section)
         })
         .expect("failed to parse config file") // HACK: Unwrapping `Option<Result<_>>`
         .expect("failed to parse config file");

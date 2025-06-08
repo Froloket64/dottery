@@ -35,7 +35,7 @@ impl Default for Config {
             },
             files: Files {
                 include: vec![".personal.toml".into()],
-            }
+            },
         }
     }
 }
@@ -44,7 +44,6 @@ impl Default for Config {
 pub struct Paths {
     pub dotfiles_path: String,
 }
-
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Files {

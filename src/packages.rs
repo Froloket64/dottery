@@ -21,21 +21,19 @@ pub(crate) fn install_pkgs<'a>(
         .stdin(Stdio::inherit())
         .spawn()
         .map(|mut c| c.wait())
-        .unwrap_or_else(|e| Err(e))
+        .unwrap_or_else(Err)
 }
 
 pub(crate) fn command_exists(cmd: &str) -> bool {
     std::env::split_paths(&std::env::var("PATH").unwrap())
-        .find(|dir| {
+        .any(|dir| {
             dir.read_dir()
                 .unwrap()
-                .find(|file_res| match file_res {
+                .any(|file_res| match file_res {
                     Err(_) => false,
                     Ok(file) => file.file_name().to_str().map(|s| s == cmd).unwrap_or(false),
                 })
-                .is_some()
         })
-        .is_some()
 }
 
 pub(crate) fn get_pkg_man() -> Option<&'static str> {

@@ -44,7 +44,7 @@ pub(crate) fn copy_raw(config: &Config, home_str: &str, verbose: bool) {
             let parent_dir = Path::new(&target_path).parent().unwrap();
 
             if !parent_dir.exists() {
-                std::fs::create_dir_all(&parent_dir).pipe(log_on_err);
+                std::fs::create_dir_all(parent_dir).pipe(log_on_err);
             }
 
             std::fs::copy(&path_str, &target_path).pipe(log_on_err)
@@ -64,7 +64,7 @@ pub(crate) fn process_templates(
     let env = Environment::new();
     let sass_extensions: [&OsStr; 2] = ["sass".as_ref(), "scss".as_ref()];
 
-    let bin_extensions = BIN_EXTENSIONS.map(|s| OsStr::new(s));
+    let bin_extensions = BIN_EXTENSIONS.map(OsStr::new);
 
     dot_files
         .into_iter()
@@ -86,7 +86,7 @@ pub(crate) fn process_templates(
             // NOTE: Skips files with no extension as well
             if path
                 .extension()
-                .map_or(true, |ext| bin_extensions.contains(&ext))
+                .is_none_or(|ext| bin_extensions.contains(&ext))
             {
                 return Ok(());
             }
@@ -123,10 +123,10 @@ pub(crate) fn process_templates(
             let parent_dir = target_path.parent().unwrap();
 
             if !parent_dir.exists() {
-                std::fs::create_dir_all(&parent_dir)?;
+                std::fs::create_dir_all(parent_dir)?;
             }
 
-            std::fs::write(&target_path, output)?;
+            std::fs::write(target_path, output)?;
 
             match f.path().extension() {
                 None => (),
@@ -163,10 +163,9 @@ fn should_deploy(entry: &DirEntry, to_deploy: &Option<Vec<String>>) -> bool {
             .clone()
             .into_path()
             .components()
-            .find(|component| match component {
+            .any(|component| match component {
                 Component::Normal(dot) => dots.contains(&dot.to_string_lossy().to_string()),
                 _ => false,
-            })
-            .is_some(),
+            }),
     }
 }
