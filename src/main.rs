@@ -1,25 +1,22 @@
-use std::{
-    ffi::OsStr,
-    fmt::Display,
-    fs::canonicalize,
-    io::{self, BufReader, Read, Seek},
-    path::{Component, Path},
-    process::{self, ExitStatus, Stdio},
-};
+use std::io;
 
-use bindet;
 use clap::{Parser, Subcommand};
 use cmd_lib::run_cmd;
-use dirs::{config_dir, home_dir};
-use minijinja::{self, Environment};
-use owo_colors::OwoColorize;
-use serde::{Deserialize, Serialize};
+use dirs::home_dir;
 use tap::prelude::*;
 use toml;
-use walkdir::WalkDir;
 
-const CONFIG_DIR: &str = "dottery";
-const CONFIG_FILE: &str = "config.toml";
+mod config;
+use config::*;
+
+mod logging;
+use logging::*;
+
+mod packages;
+use packages::*;
+
+mod processing;
+use processing::*;
 
 #[derive(Parser)]
 #[command(version)]
@@ -60,64 +57,12 @@ enum Command {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Config {
-    paths: Paths,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        let mut home = home_dir().unwrap();
-        home.push(".dotfiles");
-
-        let dotfiles_path = home.to_str().unwrap();
-
-        Self {
-            paths: Paths {
-                dotfiles_path: dotfiles_path.into(),
-            },
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Paths {
-    dotfiles_path: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Dotfiles {
-    packages: Vec<Package>,
-    dependencies: Option<Dependencies>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Package {
-    name: String,
-    from_aur: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Dependencies {
-    required: Option<Vec<Package>>,
-    optional: Option<Vec<Package>>,
-}
-
-impl Package {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn from_aur(&self) -> bool {
-        self.from_aur
-    }
-}
-
 fn main() -> io::Result<()> {
     let config = read_config()?;
 
     std::env::set_current_dir(&config.paths.dotfiles_path).expect("dotfiles directory not found");
 
+    // TODO? Defer loading config until actually needed
     let mut settings: toml::Value = std::fs::read_to_string("..toml")
         .expect("`..toml` not found in dotfiles directory")
         .pipe(|s| toml::from_str(&s))
@@ -125,8 +70,8 @@ fn main() -> io::Result<()> {
 
     let dotfiles = settings
         .as_table_mut()
-        .map(|ss| {
-            let dottery = ss
+        .map(|table| {
+            let dottery = table
                 .remove("dottery")
                 .expect("failed to get section `dottery`");
 
@@ -141,18 +86,28 @@ fn main() -> io::Result<()> {
         Command::Install {
             packages: packages_to_install,
         } => {
-            let (cmd, packages) =
-                filter_packages(dotfiles.packages.iter(), packages_to_install.as_ref());
+            let pkg_man_opt = get_pkg_man();
 
-            install_pkgs(cmd, packages.into_iter())
-                .expect(&format!("failed to spawn process `{cmd}`"));
+            match pkg_man_opt {
+                None => todo!(),
+                Some(pkg_man) => {
+                    let packages = filter_packages(
+                        pkg_man,
+                        dotfiles.packages.iter(),
+                        packages_to_install.as_ref(),
+                    );
 
-            // TODO: Perform post-installation
+                    install_pkgs(pkg_man, packages.into_iter())
+                        .expect(&format!("failed to spawn process `{pkg_man}`"));
+
+                    // TODO: Perform post-installation
+                }
+            }
         }
         Command::Sync => {
-            run_cmd!(git pull).pipe(log_on_err);
-
             run_cmd! {
+                git pull;
+
                 git submodule init;
                 git submodule sync;
                 git submodule update;
@@ -168,16 +123,20 @@ fn main() -> io::Result<()> {
             let home = home_dir().unwrap();
             let home_str = home.to_str().unwrap();
 
-            if !template_only {
+            let do_template = !raw_only;
+            let do_raw = !template_only;
+
+            if do_template {
+                log_msg("Processing template files");
+
+                process_templates(dotfiles_to_deploy, settings, &config, home_str, verbose)
+                    .pipe(log_on_err);
+            }
+
+            if do_raw {
                 log_msg("Copying raw files");
 
                 copy_raw(&config, home_str, verbose);
-            }
-
-            if !raw_only {
-                log_msg("Processing template files");
-
-                process_templates(dotfiles_to_deploy, settings, &config, home_str, verbose).pipe(log_on_err);
             }
         }
         Command::Locate => {
@@ -189,21 +148,35 @@ fn main() -> io::Result<()> {
             optional: optional_only,
         } => match dotfiles.dependencies {
             None => (),
-            Some(ds) => {
-                if !optional_only {
-                    if let Some(ps) = ds.required {
-                        let (cmd, packages) = filter_packages(ps.iter(), None);
+            Some(deps) => {
+                let pkg_man_opt = get_pkg_man();
+                let do_required = !optional_only;
+                let do_optional = !required_only;
 
-                        install_pkgs(cmd, packages.into_iter()).pipe(log_on_err);
+                if do_required {
+                    if let Some(pkgs) = deps.required {
+                        match pkg_man_opt {
+                            None => todo!(),
+                            Some(pkg_man) => {
+                                let packages = filter_packages(pkg_man, pkgs.iter(), None);
+
+                                install_pkgs(pkg_man, packages.into_iter()).pipe(log_on_err);
+                            }
+                        }
                     };
                 }
 
-                if !required_only {
-                    if let Some(ps) = ds.optional {
-                        let (cmd, packages) = filter_packages(ps.iter(), None);
+                if do_optional {
+                    if let Some(pkgs) = deps.optional {
+                        match pkg_man_opt {
+                            None => todo!(),
+                            Some(pkg_man) => {
+                                let packages = filter_packages(pkg_man, pkgs.iter(), None);
 
-                        install_pkgs(cmd, packages.into_iter()).pipe(log_on_err);
-                    }
+                                install_pkgs(pkg_man, packages.into_iter()).pipe(log_on_err);
+                            }
+                        }
+                    };
                 }
             }
         },
@@ -212,273 +185,36 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn read_config() -> io::Result<Config> {
-    let config_file = config_dir()
-        .unwrap()
-        .tap_mut(|cf| cf.push(CONFIG_DIR))
-        .tap_mut(|cf| cf.push(CONFIG_FILE));
-
-    match std::fs::read_to_string(config_file.clone()) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(config_file.clone().parent().unwrap())?;
-
-            let config_default = Config::default();
-
-            toml::to_string(&config_default)
-                .expect("failed to convert config to `toml`")
-                .pipe(|s| std::fs::write(config_file, s))
-                .expect("failed to write config file");
-
-            Ok(config_default)
-        }
-        Err(e) => {
-            log_error(&format!("failed to read config file: {e}"));
-
-            Ok(Config::default())
-        }
-        Ok(s) => Ok(toml::from_str(&s).expect("failed to parse config file")),
-    }
-    .tap_ok_mut(|c| {
-        c.paths.dotfiles_path = canonicalize(&c.paths.dotfiles_path)
-            .expect(&format!(
-                "dotfiles path not found: `{}`",
-                &c.paths.dotfiles_path
-            ))
-            .to_str()
-            .unwrap()
-            .to_string()
-    })
-}
-
-fn install_pkgs<'a>(cmd: &str, packages: impl Iterator<Item = &'a str>) -> io::Result<ExitStatus> {
-    let mut args = vec!["-S", "--needed"];
-
-    args.extend(packages);
-
-    if args.len() == 2 {
-        // HACK: Should return signify that there's no packages to install
-        return Ok(ExitStatus::default());
-    }
-
-    process::Command::new(cmd)
-        .args(args)
-        .stdin(Stdio::inherit())
-        .spawn()
-        .map(|mut c| c.wait())
-        .unwrap_or_else(|e| Err(e))
-}
-
-fn copy_raw(config: &Config, home_str: &str, verbose: bool) {
-    let dir = format!("{}/raw/", config.paths.dotfiles_path);
-    let files = WalkDir::new(dir);
-
-    files
-        .into_iter()
-        .filter_map(|r| match r {
-            Ok(d) => d.file_type().is_file().then_some(d),
-            Err(e) => {
-                log_error(&format!("failed to read file: {e}"));
-                None
-            }
-        })
-        .for_each(|f| {
-            let path_str = f
-                .path()
-                .to_string_lossy()
-                .to_string()
-                // .tap(|p| println!("{p}"));
-                .tap(|p| if verbose { println!("{p}") });
-            let target_path =
-                path_str.replace(&format!("{}/raw", config.paths.dotfiles_path), home_str);
-            let parent_dir = Path::new(&target_path).parent().unwrap();
-
-            if !parent_dir.exists() {
-                std::fs::create_dir_all(&parent_dir).pipe(log_on_err);
-            }
-
-            std::fs::copy(&path_str, &target_path).pipe(log_on_err)
-        });
-}
-
-fn process_templates(
-    to_deploy: Option<Vec<String>>,
-    settings: toml::Value,
-    config: &Config,
-    home_str: &str,
-    verbose: bool,
-) -> io::Result<()> {
-    let dir = format!("{}/template/", config.paths.dotfiles_path);
-    let files = WalkDir::new(dir);
-
-    let env = Environment::new();
-
-    files
-        .into_iter()
-        .filter_entry(|e| {
-            e.file_type().is_dir()
-                || if let Some(ref ds) = to_deploy {
-                    e.clone()
-                        .into_path()
-                        .components()
-                        .find(|c| {
-                            if let Component::Normal(d) = c {
-                                ds.contains(&d.to_string_lossy().to_string())
-                            } else {
-                                false
-                            }
-                        })
-                        .is_some()
-                } else {
-                    true
-                }
-        })
-        .filter_map(|r| match r {
-            Ok(d) => d.file_type().is_file().then_some(d),
-            Err(e) => {
-                log_error(&format!("failed to read file: {e}"));
-                None
-            }
-        })
-        .map(|f| {
-            let path = f.path();
-            let path_str = path.to_str().unwrap();
-            let file = std::fs::File::open(path)?;
-
-            let mut buf = BufReader::new(file);
-            let mut contents = String::new();
-
-            match bindet::detect(&mut buf)? {
-                Some(_) => return Ok(()),
-                None => (),
-            };
-
-            buf.rewind()?;
-            buf.read_to_string(&mut contents)?;
-
-            if verbose {
-                println!("{path_str}");
-            }
-
-            let tmpl = match env.template_from_str(&contents) {
-                Ok(t) => t,
-                Err(e) => {
-                    log_error(&format!("{e}"));
-                    return Ok(());
-                }
-            };
-
-            let output = match tmpl.render(&settings) {
-                Ok(o) => o,
-                Err(e) => {
-                    log_error(&format!("{e}"));
-                    return Ok(());
-                }
-            };
-
-            let target_path_str = path_str.replace(
-                &format!("{}/template", config.paths.dotfiles_path),
-                home_str,
-            );
-            let target_path = Path::new(&target_path_str);
-            let parent_dir = target_path.parent().unwrap();
-
-            if !parent_dir.exists() {
-                std::fs::create_dir_all(&parent_dir)?;
-            }
-
-            std::fs::write(&target_path, output)?;
-
-            process_sass(target_path);
-
-            Ok(())
-        })
-        .collect::<io::Result<()>>()
-}
-
-// TODO: Use an enum for package manager
+// TODO? Use an enum for package manager
+// TODO? Use custom/other iterator type for return value to chain with other filter functions (e.g. `filter_recipe()` -> `filter_to_install()`)
 fn filter_packages<'a>(
+    pkg_man: &str,
     packages: impl Iterator<Item = &'a Package>,
     to_install: Option<&Vec<String>>,
-) -> (&'a str, Vec<&'a str>) {
+) -> Vec<&'a str> {
     // NOTE: Collecting into a `Vec<_>` isn't very efficient, but is preferred because
     // makes the code more readable. Iterators are different types, so the `if let` would be a
     // lot more cluttered.
-    if !is_yay_installed() {
-        (
-            "pacman",
-            packages
-                .into_iter()
-                .filter_map(|pkg| pkg.from_aur().then_some(pkg.name()))
-                .pipe(|pkgs| {
-                    if let Some(ps) = to_install {
-                        pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
-                    } else {
-                        pkgs.collect()
-                    }
-                }),
-        )
-    } else {
-        (
-            "yay",
-            packages.into_iter().map(Package::name).pipe(|pkgs| {
+    if pkg_man == "yay" {
+        packages.into_iter().map(Package::name).pipe(|pkgs| {
+            if let Some(ps) = to_install {
+                pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
+            } else {
+                pkgs.collect()
+            }
+        })
+    } else if pkg_man == "pacman" {
+        packages
+            .into_iter()
+            .filter_map(|pkg| pkg.from_aur().then_some(pkg.name()))
+            .pipe(|pkgs| {
                 if let Some(ps) = to_install {
                     pkgs.filter(|pkg| ps.contains(&pkg.to_string())).collect()
                 } else {
                     pkgs.collect()
                 }
-            }),
-        )
+            })
+    } else {
+        todo!()
     }
-}
-
-fn is_yay_installed() -> bool {
-    match process::Command::new("yay")
-        .arg("--version")
-        .stdout(Stdio::inherit())
-        .spawn()
-    {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
-        Err(e) => {
-            // Assume that it's just an error on user's side and
-            // let them know about it
-            log_error(&format!("{e}"));
-
-            // Continue attempting to use `yay`
-            true
-        }
-        Ok(_) => true,
-    }
-}
-
-fn log_msg(msg: &str) {
-    println!("{} {}", ">>".bright_black(), msg.bold());
-}
-
-fn log_error(msg: &str) {
-    eprintln!("{} {}", "ERROR:".bright_red(), msg.bold());
-}
-
-fn log_on_err<T, E: Display>(result: Result<T, E>) {
-    let _ = result.map_err(|e| log_error(&format!("{e}")));
-}
-
-fn process_sass<P: AsRef<Path>>(path: P) {
-    let sass_extensions: Vec<&OsStr> = ["sass", "scss"].into_iter().map(str::as_ref).collect();
-    let old_path = path.as_ref();
-
-    old_path.extension().map(|e| {
-        if sass_extensions.contains(&e) {
-            let new_path = old_path.with_extension("css");
-
-            let result = run_cmd! {
-                sass ${old_path} ${new_path} --no-source-map
-            };
-
-            log_on_err(result);
-        }
-        // } else {
-        //     Ok(())
-        // }
-    });
-    // .unwrap_or(Ok(()))
 }
