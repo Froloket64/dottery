@@ -2,7 +2,7 @@ use std::io;
 
 use clap::{Parser, Subcommand};
 use cmd_lib::run_cmd;
-use dirs::home_dir;
+use dirs::{config_dir, home_dir};
 use tap::prelude::*;
 use toml;
 
@@ -56,7 +56,11 @@ enum Command {
 }
 
 fn main() -> io::Result<()> {
-    let config = read_config()?;
+    let config_file = config_dir()
+        .unwrap()
+        .tap_mut(|path| path.push(CONFIG_DIR))
+        .tap_mut(|path| path.push(CONFIG_FILE));
+    let config = read_config(&config_file)?;
 
     std::env::set_current_dir(&config.paths.dotfiles_path).expect("dotfiles directory not found");
 

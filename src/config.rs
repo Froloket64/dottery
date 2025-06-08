@@ -1,6 +1,7 @@
-use dirs::{config_dir, home_dir};
+use std::{fs::canonicalize, io, path::Path};
+
+use dirs::home_dir;
 pub use serde::{Deserialize, Serialize};
-use std::{fs::canonicalize, io};
 use tap::prelude::*;
 
 use crate::logging::log_error;
@@ -80,12 +81,7 @@ impl Package {
 }
 
 /// Parses the config file into `io::Result<[Config]>`.
-pub fn read_config() -> io::Result<Config> {
-    let config_file = config_dir()
-        .unwrap()
-        .tap_mut(|path| path.push(CONFIG_DIR))
-        .tap_mut(|path| path.push(CONFIG_FILE));
-
+pub fn read_config(config_file: &Path) -> io::Result<Config> {
     let mut config_res = match std::fs::read_to_string(config_file.clone()) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             std::fs::create_dir_all(config_file.clone().parent().unwrap())?;
