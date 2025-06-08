@@ -7,15 +7,13 @@ use tap::prelude::*;
 use toml;
 
 mod config;
-use config::*;
-
 mod logging;
-use logging::*;
-
 mod packages;
-use packages::*;
-
 mod processing;
+
+use config::*;
+use logging::*;
+use packages::*;
 use processing::*;
 
 #[derive(Parser)]

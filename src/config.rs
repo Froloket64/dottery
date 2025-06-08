@@ -5,9 +5,16 @@ use tap::prelude::*;
 
 use crate::logging::log_error;
 
+/// Default config directory.
+///
+/// Typically appended to `~/.config/` to get the full path.
 pub const CONFIG_DIR: &str = "dottery";
+/// Default config file location. See [`CONFIG_DIR`] for full path.
 pub const CONFIG_FILE: &str = "config.toml";
 
+/// Dottery config.
+///
+/// See [`CONFIG_FILE`] for default location.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub paths: Paths,
@@ -33,18 +40,27 @@ pub struct Paths {
     pub dotfiles_path: String,
 }
 
+/// Core dotfiles manifest.
+///
+/// NOTE: The rest of the variables in `..toml` and `.personal.toml` are stored
+/// and processed separately.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Dotfiles {
+    /// Packages that are linked to the dotfiles (usually `template/`).
     pub packages: Vec<Package>,
+    /// Other packages that are expected to be installed.
     pub dependencies: Option<Dependencies>,
 }
 
+// TODO: Post-installation (scripts?)
+/// A recipe that contains all information for a package to be installed.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Package {
     name: String,
     from_aur: Option<bool>,
 }
 
+/// Contains required and optional dependencies.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Dependencies {
     pub required: Option<Vec<Package>>,
@@ -52,15 +68,18 @@ pub struct Dependencies {
 }
 
 impl Package {
+    /// Returns package name.
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
+    /// Returns whether the package should be installed from the AUR.
     pub fn from_aur(&self) -> bool {
         self.from_aur.unwrap_or(false)
     }
 }
 
+/// Parses the config file into `io::Result<[Config]>`.
 pub fn read_config() -> io::Result<Config> {
     let config_file = config_dir()
         .unwrap()
